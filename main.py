@@ -231,3 +231,74 @@ def test_points():
         },
         "features": features,
     }
+
+
+@app.get("/test-all")
+def test_all():
+    """
+    Debug endpoint: return ALL detected hail (any size, even dime-size).
+    Useful for confirming the pipeline is alive when there's no big hail.
+    Threshold: 5mm (0.2") — essentially any radar pixel with hail echo.
+    """
+    grib_bytes = download_mesh()
+    if not grib_bytes:
+        raise HTTPException(500, "Could not fetch MESH file")
+
+    result = decode_mesh(grib_bytes)
+    if not result:
+        raise HTTPException(500, "Could not decode MESH")
+
+    values = result["values"]
+    lats = result["lats"]
+    lons = result["lons"]
+
+    # ANY detectable hail (≥5mm means radar saw something)
+    mask = values >= 5
+    indices = np.argwhere(mask)
+
+    if len(indices) == 0:
+        return {
+            "type": "FeatureCollection",
+            "metadata": {
+                "timestamp": result["timestamp"],
+                "max_inches": result["max_inches"],
+                "message": "Radar shows no hail anywhere in CONUS (genuinely quiet)",
+            },
+            "features": [],
+        }
+
+    # Sort by size descending, cap at 2000 points for payload safety
+    sizes = values[mask]
+    order = np.argsort(-sizes)[:2000]
+
+    features = []
+    for i in order:
+        ridx, cidx = indices[i]
+        mm = float(values[ridx, cidx])
+        inches = round(mm / 25.4, 2)
+        lon = float(lons[ridx, cidx])
+        if lon > 180:
+            lon -= 360
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, float(lats[ridx, cidx])],
+            },
+            "properties": {
+                "sizeMM": round(mm, 1),
+                "sizeInches": inches,
+            },
+        })
+
+    return {
+        "type": "FeatureCollection",
+        "metadata": {
+            "timestamp": result["timestamp"],
+            "total_pixels_detected": int(mask.sum()),
+            "shown_top": len(features),
+            "max_inches": result["max_inches"],
+            "note": "Includes ALL radar-detected hail (even small). For map display use /test-points which filters to 1\"+.",
+        },
+        "features": features,
+    }
