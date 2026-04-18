@@ -205,11 +205,15 @@ def test_points():
         ridx, cidx = indices[i]
         mm = float(values[ridx, cidx])
         inches = round(mm / 25.4, 2)
+        # Convert longitude from NOAA's 0-360 convention to web map -180/+180
+        lon = float(lons[ridx, cidx])
+        if lon > 180:
+            lon -= 360
         features.append({
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [float(lons[ridx, cidx]), float(lats[ridx, cidx])],
+                "coordinates": [lon, float(lats[ridx, cidx])],
             },
             "properties": {
                 "sizeMM": round(mm, 1),
